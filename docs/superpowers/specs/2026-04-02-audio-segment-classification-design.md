@@ -48,8 +48,8 @@ YAMNet produces scores for 521 AudioSet classes per frame. These are grouped int
 
 ### Inference Resolution
 
-- 0.1s hop between frames
-- Timestamps reported at raw decimal precision (one decimal place from 0.1s resolution, no rounding)
+- 0.48s hop between frames (YAMNet's native hop size)
+- Timestamps reported at raw decimal precision (no rounding)
 
 ## Post-Processing
 
