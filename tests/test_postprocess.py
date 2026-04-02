@@ -1,39 +1,43 @@
 from concert_scribe.postprocess import merge_segments
 
 HOP = 0.48
+# Use 4 frames = 1.92s to exceed the 1.5s music/talking minimum
+# Use 5 frames = 2.4s to exceed the 2.0s silence minimum
 
 
 def test_merge_adjacent_same_category():
-    categories = ["music", "music", "music", "silence", "silence"]
-    details = [["Piano"], ["Piano", "Violin, fiddle"], ["Violin, fiddle"], [], []]
+    categories = ["music"] * 4 + ["silence"] * 5
+    details = [["Piano"], ["Piano", "Violin, fiddle"], ["Violin, fiddle"], ["Piano"]] + [[]] * 5
 
-    segments = merge_segments(categories, details, hop_sec=HOP, min_silence_sec=2.0)
+    segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 2
     assert segments[0]["category"] == "music"
     assert abs(segments[0]["start"] - 0.0) < 0.01
-    assert abs(segments[0]["end"] - 1.44) < 0.01
-    assert set(segments[0]["subtypes"]) == {"Piano", "Violin, fiddle"}
+    assert abs(segments[0]["end"] - 1.92) < 0.01
+    assert set(segments[0]["subtypes"].keys()) == {"Piano", "Violin, fiddle"}
+    assert abs(segments[0]["subtypes"]["Piano"] - 1.44) < 0.01  # 3 frames
+    assert abs(segments[0]["subtypes"]["Violin, fiddle"] - 0.96) < 0.01  # 2 frames
     assert segments[1]["category"] == "silence"
 
 
 def test_short_silence_absorbed_same_neighbors():
-    # music, silence (1 frame = 0.48s < 2s), music -> all music
-    categories = ["music", "silence", "music"]
-    details = [["Piano"], [], ["Piano"]]
+    # music (4 frames), silence (1 frame = 0.48s < 2s), music (4 frames) -> all music
+    categories = ["music"] * 4 + ["silence"] + ["music"] * 4
+    details = [["Piano"]] * 4 + [[]] + [["Piano"]] * 4
 
-    segments = merge_segments(categories, details, hop_sec=HOP, min_silence_sec=2.0)
+    segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 1
     assert segments[0]["category"] == "music"
 
 
 def test_short_silence_absorbed_different_neighbors():
-    # talking, silence (1 frame), music -> silence split at midpoint
-    categories = ["talking", "talking", "silence", "music", "music"]
-    details = [[], [], [], ["Piano"], ["Piano"]]
+    # talking (4 frames), silence (1 frame), music (4 frames)
+    categories = ["talking"] * 4 + ["silence"] + ["music"] * 4
+    details = [[]] * 4 + [[]] + [["Piano"]] * 4
 
-    segments = merge_segments(categories, details, hop_sec=HOP, min_silence_sec=2.0)
+    segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 2
     assert segments[0]["category"] == "talking"
@@ -41,11 +45,11 @@ def test_short_silence_absorbed_different_neighbors():
 
 
 def test_long_silence_preserved():
-    # silence for 5 frames = 2.4s > 2s threshold
-    categories = ["music", "music"] + ["silence"] * 5 + ["talking"]
-    details = [["Piano"], ["Piano"]] + [[]] * 5 + [[]]
+    # music (4 frames), silence (5 frames = 2.4s > 2s), talking (4 frames)
+    categories = ["music"] * 4 + ["silence"] * 5 + ["talking"] * 4
+    details = [["Piano"]] * 4 + [[]] * 5 + [[]] * 4
 
-    segments = merge_segments(categories, details, hop_sec=HOP, min_silence_sec=2.0)
+    segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 3
     assert segments[0]["category"] == "music"
@@ -54,10 +58,10 @@ def test_long_silence_preserved():
 
 
 def test_silence_at_start_preserved_if_long():
-    categories = ["silence"] * 5 + ["music"]
-    details = [[]] * 5 + [["Piano"]]
+    categories = ["silence"] * 5 + ["music"] * 4
+    details = [[]] * 5 + [["Piano"]] * 4
 
-    segments = merge_segments(categories, details, hop_sec=HOP, min_silence_sec=2.0)
+    segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 2
     assert segments[0]["category"] == "silence"
@@ -65,10 +69,63 @@ def test_silence_at_start_preserved_if_long():
 
 
 def test_silence_at_start_absorbed_if_short():
-    categories = ["silence", "music", "music"]
-    details = [[], ["Piano"], ["Piano"]]
+    categories = ["silence"] + ["music"] * 4
+    details = [[]] + [["Piano"]] * 4
 
-    segments = merge_segments(categories, details, hop_sec=HOP, min_silence_sec=2.0)
+    segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 1
     assert segments[0]["category"] == "music"
+
+
+def test_short_music_absorbed_into_neighbors():
+    # silence (5 frames), music (1 frame = 0.48s < 1.5s), silence (5 frames) -> all silence
+    categories = ["silence"] * 5 + ["music"] + ["silence"] * 5
+    details = [[]] * 5 + [["Piano"]] + [[]] * 5
+
+    segments = merge_segments(categories, details, hop_sec=HOP)
+
+    assert len(segments) == 1
+    assert segments[0]["category"] == "silence"
+
+
+def test_short_music_absorbed_into_applause():
+    # applause (4 frames), music (1 frame), applause (4 frames) -> all applause
+    categories = ["applause"] * 4 + ["music"] + ["applause"] * 4
+    details = [[]] * 4 + [["Piano"]] + [[]] * 4
+
+    segments = merge_segments(categories, details, hop_sec=HOP)
+
+    assert len(segments) == 1
+    assert segments[0]["category"] == "applause"
+
+
+def test_short_talking_absorbed():
+    # silence (5 frames), talking (1 frame = 0.48s < 1.5s), silence (5 frames) -> all silence
+    categories = ["silence"] * 5 + ["talking"] + ["silence"] * 5
+    details = [[]] * 11
+
+    segments = merge_segments(categories, details, hop_sec=HOP)
+
+    assert len(segments) == 1
+    assert segments[0]["category"] == "silence"
+
+
+def test_first_segment_starts_at_zero():
+    categories = ["music"] * 4
+    details = [["Piano"]] * 4
+
+    segments = merge_segments(categories, details, hop_sec=HOP)
+
+    assert segments[0]["start"] == 0.0
+
+
+def test_subtype_durations_are_seconds():
+    categories = ["music"] * 10
+    details = [["Piano", "Violin, fiddle"]] * 6 + [["Piano"]] * 4
+
+    segments = merge_segments(categories, details, hop_sec=HOP)
+
+    assert len(segments) == 1
+    assert abs(segments[0]["subtypes"]["Piano"] - 4.8) < 0.01  # 10 frames * 0.48
+    assert abs(segments[0]["subtypes"]["Violin, fiddle"] - 2.88) < 0.01  # 6 frames * 0.48

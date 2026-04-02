@@ -1,5 +1,6 @@
 """Post-processing: merge frames into segments, enforce silence minimum."""
 
+from collections import Counter
 from typing import TypedDict
 
 
@@ -7,7 +8,68 @@ class Segment(TypedDict):
     category: str
     start: float
     end: float
-    subtypes: list[str]
+    subtypes: dict[str, float]  # subtype name -> total seconds detected
+
+
+def _absorb_short_segments(
+    segments: list[Segment],
+    category: str,
+    min_duration: float,
+) -> list[Segment]:
+    """Absorb segments of a given category shorter than min_duration into neighbors."""
+    if not segments:
+        return segments
+
+    result: list[Segment] = []
+    for seg in segments:
+        is_short = (
+            seg["category"] == category
+            and (seg["end"] - seg["start"]) < min_duration
+        )
+        if is_short:
+            if result:
+                # Absorb into previous segment
+                result[-1]["end"] = seg["end"]
+                # Merge subtype durations
+                for k, v in seg["subtypes"].items():
+                    result[-1]["subtypes"][k] = result[-1]["subtypes"].get(k, 0.0) + v
+            # If no previous, will be absorbed forward (handled below)
+        else:
+            # If previous was a short segment that couldn't be absorbed backward
+            # (at the start), absorb it forward
+            if result and result[-1]["category"] == category and (result[-1]["end"] - result[-1]["start"]) < min_duration:
+                seg = Segment(
+                    category=seg["category"],
+                    start=result[-1]["start"],
+                    end=seg["end"],
+                    subtypes=seg["subtypes"],
+                )
+                result.pop()
+            result.append(seg)
+
+    # Handle trailing short segment
+    if len(result) > 1 and result[-1]["category"] == category and (result[-1]["end"] - result[-1]["start"]) < min_duration:
+        result[-2]["end"] = result[-1]["end"]
+        for k, v in result[-1]["subtypes"].items():
+            result[-2]["subtypes"][k] = result[-2]["subtypes"].get(k, 0.0) + v
+        result.pop()
+
+    return result
+
+
+def _remerge_adjacent(segments: list[Segment]) -> list[Segment]:
+    """Re-merge adjacent segments that share a category."""
+    if not segments:
+        return segments
+    merged: list[Segment] = [segments[0]]
+    for seg in segments[1:]:
+        if seg["category"] == merged[-1]["category"]:
+            merged[-1]["end"] = seg["end"]
+            for k, v in seg["subtypes"].items():
+                merged[-1]["subtypes"][k] = merged[-1]["subtypes"].get(k, 0.0) + v
+        else:
+            merged.append(seg)
+    return merged
 
 
 def merge_segments(
@@ -15,6 +77,8 @@ def merge_segments(
     music_details: list[list[str]],
     hop_sec: float,
     min_silence_sec: float = 2.0,
+    min_music_sec: float = 1.5,
+    min_talking_sec: float = 1.5,
 ) -> list[Segment]:
     """Merge per-frame categories into contiguous segments.
 
@@ -23,7 +87,9 @@ def merge_segments(
         music_details: Per-frame music sub-type lists.
         hop_sec: Duration of each frame hop in seconds.
         min_silence_sec: Minimum duration for silence segments.
-            Shorter silence is absorbed into neighbors.
+        min_music_sec: Minimum duration for music segments.
+        min_talking_sec: Minimum duration for talking segments.
+            Shorter segments are absorbed into neighbors.
 
     Returns:
         List of Segment dicts with category, start, end, subtypes.
@@ -35,75 +101,56 @@ def merge_segments(
     raw_segments: list[Segment] = []
     current_cat = categories[0]
     current_start = 0
-    current_subtypes: set[str] = set(music_details[0])
+    current_subtype_counts: Counter[str] = Counter(music_details[0])
 
     for i in range(1, len(categories)):
         if categories[i] != current_cat:
+            # Convert frame counts to seconds
+            subtype_durations = {k: v * hop_sec for k, v in current_subtype_counts.items()}
             raw_segments.append(
                 Segment(
                     category=current_cat,
                     start=current_start * hop_sec,
                     end=i * hop_sec,
-                    subtypes=sorted(current_subtypes),
+                    subtypes=subtype_durations,
                 )
             )
             current_cat = categories[i]
             current_start = i
-            current_subtypes = set(music_details[i])
+            current_subtype_counts = Counter(music_details[i])
         else:
-            current_subtypes.update(music_details[i])
+            current_subtype_counts.update(music_details[i])
 
+    subtype_durations = {k: v * hop_sec for k, v in current_subtype_counts.items()}
     raw_segments.append(
         Segment(
             category=current_cat,
             start=current_start * hop_sec,
             end=len(categories) * hop_sec,
-            subtypes=sorted(current_subtypes),
+            subtypes=subtype_durations,
         )
     )
 
-    # Step 2: Absorb short silence segments
-    if len(raw_segments) <= 1:
-        return raw_segments
+    # Step 2: Absorb short segments (music, talking, then silence)
+    result = raw_segments
+    result = _absorb_short_segments(result, "music", min_music_sec)
+    result = _remerge_adjacent(result)
+    result = _absorb_short_segments(result, "talking", min_talking_sec)
+    result = _remerge_adjacent(result)
+    result = _absorb_short_segments(result, "silence", min_silence_sec)
+    result = _remerge_adjacent(result)
 
-    result: list[Segment] = []
-    for idx, seg in enumerate(raw_segments):
-        is_short_silence = (
-            seg["category"] == "silence"
-            and (seg["end"] - seg["start"]) < min_silence_sec
-        )
-        has_next = idx < len(raw_segments) - 1
+    # Step 3: Ensure first segment starts at 0.0
+    if result and result[0]["start"] > 0.0:
+        result[0]["start"] = 0.0
 
-        if is_short_silence and has_next:
-            # Short silence with a following segment: absorb into previous non-silence
-            # neighbor (extend it), or if none, absorb forward into next segment
-            if result and result[-1]["category"] != "silence":
-                # Extend previous segment to cover this silence
-                result[-1]["end"] = seg["end"]
-            # If no previous non-silence, it will be absorbed by the next segment
-            # (handled below when the next segment is added)
-        else:
-            # If the previous segment was a short silence that couldn't be absorbed
-            # backward (it was at the start), absorb it forward into this segment
-            if result and result[-1]["category"] == "silence" and (result[-1]["end"] - result[-1]["start"]) < min_silence_sec:
-                seg = Segment(
-                    category=seg["category"],
-                    start=result[-1]["start"],
-                    end=seg["end"],
-                    subtypes=seg["subtypes"],
-                )
-                result.pop()
-            result.append(seg)
+    # Safety: if everything got absorbed, return a single segment
+    if not result and categories:
+        result = [Segment(
+            category="silence",
+            start=0.0,
+            end=len(categories) * hop_sec,
+            subtypes={},
+        )]
 
-    # Step 3: Re-merge adjacent segments that now share a category
-    # (can happen when silence between same-category segments was absorbed)
-    merged: list[Segment] = [result[0]]
-    for seg in result[1:]:
-        if seg["category"] == merged[-1]["category"]:
-            subtypes = sorted(set(merged[-1]["subtypes"]) | set(seg["subtypes"]))
-            merged[-1]["end"] = seg["end"]
-            merged[-1]["subtypes"] = subtypes
-        else:
-            merged.append(seg)
-
-    return merged
+    return result

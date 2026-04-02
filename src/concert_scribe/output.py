@@ -13,6 +13,14 @@ def _format_timestamp(t: float) -> str:
     return s
 
 
+def _format_duration(t: float) -> str:
+    """Format a duration in seconds."""
+    s = f"{t:.1f}"
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s + "s"
+
+
 def write_segments(segments: list[Segment], output_path: str) -> None:
     """Write segments to a text file.
 
@@ -26,5 +34,8 @@ def write_segments(segments: list[Segment], output_path: str) -> None:
             end = _format_timestamp(seg["end"])
             line = f"{start}-{end}: {seg['category']}"
             if seg["subtypes"]:
-                line += f" ({', '.join(seg['subtypes'])})"
+                # Sort by duration descending
+                sorted_subs = sorted(seg["subtypes"].items(), key=lambda x: -x[1])
+                parts = [f"{name}: {_format_duration(dur)}" for name, dur in sorted_subs]
+                line += f" ({', '.join(parts)})"
             f.write(line + "\n")

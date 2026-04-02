@@ -7,11 +7,11 @@ from concert_scribe.postprocess import Segment
 
 def test_write_segments_format():
     segments = [
-        Segment(category="silence", start=0.0, end=4.32, subtypes=[]),
-        Segment(category="talking", start=4.32, end=15.36, subtypes=[]),
-        Segment(category="music", start=15.36, end=40.32, subtypes=["Piano", "Singing"]),
-        Segment(category="applause", start=40.32, end=45.12, subtypes=[]),
-        Segment(category="silence", start=45.12, end=50.4, subtypes=[]),
+        Segment(category="silence", start=0.0, end=4.32, subtypes={}),
+        Segment(category="talking", start=4.32, end=15.36, subtypes={}),
+        Segment(category="music", start=15.36, end=40.32, subtypes={"Piano": 20.16, "Singing": 10.08}),
+        Segment(category="applause", start=40.32, end=45.12, subtypes={}),
+        Segment(category="silence", start=45.12, end=50.4, subtypes={}),
     ]
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -24,7 +24,7 @@ def test_write_segments_format():
     assert len(lines) == 5
     assert lines[0] == "0.0-4.32: silence"
     assert lines[1] == "4.32-15.36: talking"
-    assert lines[2] == "15.36-40.32: music (Piano, Singing)"
+    assert lines[2] == "15.36-40.32: music (Piano: 20.2s, Singing: 10.1s)"
     assert lines[3] == "40.32-45.12: applause"
     assert lines[4] == "45.12-50.4: silence"
 
