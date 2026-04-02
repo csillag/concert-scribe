@@ -1,6 +1,10 @@
 import numpy as np
 
-from concert_scribe.classify import CATEGORY_CLASSES, map_scores_to_categories
+from concert_scribe.classify import (
+    CATEGORY_CLASSES,
+    _deduplicate_subtypes,
+    map_scores_to_categories,
+)
 
 
 def test_category_classes_cover_four_categories():
@@ -49,3 +53,24 @@ def test_map_scores_to_categories_returns_music_subtypes():
     assert categories[1] == "music"
     assert "Piano" in details[0]
     assert "Violin, fiddle" in details[1]
+
+
+def test_deduplicate_subtypes_removes_ancestors():
+    # Violin triggers Bowed string instrument, Musical instrument etc.
+    subtypes = ["Violin, fiddle", "Bowed string instrument", "String section", "Orchestra"]
+    result = _deduplicate_subtypes(subtypes)
+    assert "Violin, fiddle" in result
+    assert "Orchestra" in result
+    # Bowed string instrument is ancestor of Violin
+    assert "Bowed string instrument" not in result
+    # String section is ancestor of... wait, String section is child of Bowed string instrument
+    # String section's ancestor chain: String section -> Bowed string instrument -> Musical instrument
+    # Violin's ancestor chain: Violin -> Bowed string instrument -> Musical instrument
+    # So String section is NOT an ancestor of Violin. It should stay.
+    assert "String section" in result
+
+
+def test_deduplicate_subtypes_keeps_leaf_only():
+    subtypes = ["Piano", "Keyboard (musical)"]
+    result = _deduplicate_subtypes(subtypes)
+    assert result == ["Piano"]

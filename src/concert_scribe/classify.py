@@ -119,6 +119,112 @@ for _cat, _names in CATEGORY_CLASSES.items():
 # Music sub-type names: everything in the music set except the generic "Music" label
 _MUSIC_SUBTYPES: set[str] = CATEGORY_CLASSES["music"] - {"Music", "Musical instrument"}
 
+# AudioSet ontology: child -> parent (within our music class set)
+_MUSIC_PARENT_MAP: dict[str, str] = {
+    "Accordion": "Musical instrument",
+    "Acoustic guitar": "Guitar",
+    "Bagpipes": "Musical instrument",
+    "Banjo": "Plucked string instrument",
+    "Bass drum": "Drum",
+    "Bass guitar": "Guitar",
+    "Bell": "Musical instrument",
+    "Bowed string instrument": "Musical instrument",
+    "Brass instrument": "Musical instrument",
+    "Cello": "Bowed string instrument",
+    "Change ringing (campanology)": "Bell",
+    "Chant": "Singing",
+    "Chime": "Bell",
+    "Choir": "Singing",
+    "Church bell": "Bell",
+    "Clarinet": "Wind instrument, woodwind instrument",
+    "Cymbal": "Percussion",
+    "Didgeridoo": "Musical instrument",
+    "Double bass": "Bowed string instrument",
+    "Drum": "Percussion",
+    "Drum kit": "Percussion",
+    "Drum machine": "Drum kit",
+    "Drum roll": "Snare drum",
+    "Electric guitar": "Guitar",
+    "Electric piano": "Piano",
+    "Electronic organ": "Organ",
+    "Flute": "Wind instrument, woodwind instrument",
+    "French horn": "Brass instrument",
+    "Glockenspiel": "Mallet percussion",
+    "Gong": "Percussion",
+    "Guitar": "Plucked string instrument",
+    "Hammond organ": "Organ",
+    "Harmonica": "Musical instrument",
+    "Harp": "Musical instrument",
+    "Harpsichord": "Keyboard (musical)",
+    "Hi-hat": "Cymbal",
+    "Jingle bell": "Bell",
+    "Keyboard (musical)": "Musical instrument",
+    "Mallet percussion": "Percussion",
+    "Mandolin": "Plucked string instrument",
+    "Mantra": "Chant",
+    "Maraca": "Rattle (instrument)",
+    "Marimba, xylophone": "Mallet percussion",
+    "Musical instrument": "Music",
+    "Orchestra": "Musical instrument",
+    "Organ": "Keyboard (musical)",
+    "Percussion": "Musical instrument",
+    "Piano": "Keyboard (musical)",
+    "Pizzicato": "Violin, fiddle",
+    "Plucked string instrument": "Musical instrument",
+    "Rattle (instrument)": "Percussion",
+    "Rimshot": "Snare drum",
+    "Sampler": "Synthesizer",
+    "Saxophone": "Wind instrument, woodwind instrument",
+    "Shofar": "Musical instrument",
+    "Singing bowl": "Musical instrument",
+    "Sitar": "Plucked string instrument",
+    "Snare drum": "Drum",
+    "Steel guitar, slide guitar": "Guitar",
+    "Steelpan": "Mallet percussion",
+    "String section": "Bowed string instrument",
+    "Strum": "Guitar",
+    "Synthesizer": "Keyboard (musical)",
+    "Tabla": "Drum",
+    "Tambourine": "Percussion",
+    "Tapping (guitar technique)": "Guitar",
+    "Theremin": "Musical instrument",
+    "Timpani": "Drum",
+    "Trombone": "Brass instrument",
+    "Trumpet": "Brass instrument",
+    "Tubular bells": "Percussion",
+    "Tuning fork": "Bell",
+    "Ukulele": "Plucked string instrument",
+    "Vibraphone": "Mallet percussion",
+    "Violin, fiddle": "Bowed string instrument",
+    "Wind chime": "Chime",
+    "Wind instrument, woodwind instrument": "Musical instrument",
+    "Wood block": "Percussion",
+    "Yodeling": "Singing",
+    "Zither": "Plucked string instrument",
+}
+
+
+def _get_ancestors(name: str) -> set[str]:
+    """Get all ancestors of a class in the hierarchy."""
+    ancestors: set[str] = set()
+    current = name
+    while current in _MUSIC_PARENT_MAP:
+        parent = _MUSIC_PARENT_MAP[current]
+        ancestors.add(parent)
+        current = parent
+    return ancestors
+
+
+def _deduplicate_subtypes(subtypes: list[str]) -> list[str]:
+    """Remove parent classes when a more specific child is present."""
+    subtype_set = set(subtypes)
+    # Collect all ancestors of all detected subtypes
+    redundant: set[str] = set()
+    for name in subtypes:
+        redundant |= _get_ancestors(name)
+    # Keep only subtypes that aren't redundant ancestors
+    return [s for s in subtypes if s not in redundant]
+
 
 def _build_category_indices(
     class_names: list[str],
@@ -176,13 +282,15 @@ def map_scores_to_categories(
 
         categories.append(best_cat)
 
-        # Collect music sub-types for this frame
+        # Collect music sub-types for this frame (deduplicated by hierarchy)
         subtypes: list[str] = []
         if best_cat == "music":
+            raw_subtypes: list[str] = []
             for idx in cat_indices["music"]:
                 name = class_names[idx]
                 if name in _MUSIC_SUBTYPES and frame_scores[idx] >= threshold:
-                    subtypes.append(name)
+                    raw_subtypes.append(name)
+            subtypes = _deduplicate_subtypes(raw_subtypes)
         music_details.append(subtypes)
 
     return categories, music_details
