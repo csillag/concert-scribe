@@ -4,13 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "concert-scribe"
-version = "0.1.0"
+version = "0.1.1"
 description = "Classify audio segments in concert recordings"
 requires-python = ">=3.9"
 dependencies = [
     "tensorflow>=2.13",
     "tensorflow-hub>=0.14",
     "numpy>=1.23",
+    "setuptools",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "build",
+    "twine",
 ]
 
 [project.scripts]
