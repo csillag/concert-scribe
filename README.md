@@ -1,5 +1,7 @@
 # Concert Scribe
 
+![Concert Scribe](https://raw.githubusercontent.com/csillag/concert-scribe/main/images/scribe.png)
+
 Classify audio in concert recordings into segments of **silence**, **talking**, **music**, and **applause**.
 
 Takes video files as input (typically output from [SoundGraft](https://github.com/csillag/soundgraft)), extracts the audio, runs it through Google's [YAMNet](https://tfhub.dev/google/yamnet/1) model, and produces a simple text file describing the timeline.
