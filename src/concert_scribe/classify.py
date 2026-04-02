@@ -194,8 +194,23 @@ _class_names: Optional[list[str]] = None
 HOP_SECONDS = 0.48  # YAMNet's native hop size
 
 
+def _ensure_pkg_resources():
+    """Ensure pkg_resources is importable (needed by tensorflow_hub on Python 3.12+)."""
+    try:
+        import pkg_resources  # noqa: F401
+    except ImportError:
+        import sys
+        import types
+
+        # tensorflow_hub only uses pkg_resources.parse_version, so provide a minimal shim
+        mod = types.ModuleType("pkg_resources")
+        mod.parse_version = lambda v: tuple(int(x) for x in v.split(".") if x.isdigit())
+        sys.modules["pkg_resources"] = mod
+
+
 def load_model():
     """Load YAMNet model and class names. Caches after first call."""
+    _ensure_pkg_resources()
     import tensorflow_hub as hub
 
     global _model, _class_names
