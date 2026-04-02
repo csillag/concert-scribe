@@ -29,6 +29,23 @@ def test_write_segments_format():
     assert lines[4] == "45.12-50.4: silence"
 
 
+def test_write_segments_display_names():
+    segments = [
+        Segment(category="music", start=0.0, end=10.0, subtypes={"Violin, fiddle": 8.0, "Wind instrument, woodwind instrument": 2.0}),
+    ]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = os.path.join(tmpdir, "test.txt")
+        write_segments(segments, out_path)
+
+        with open(out_path) as f:
+            line = f.read().strip()
+
+    assert "Violin:" in line
+    assert "Woodwind:" in line
+    assert "fiddle" not in line
+
+
 def test_write_segments_empty():
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path = os.path.join(tmpdir, "empty.txt")

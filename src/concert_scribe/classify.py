@@ -119,6 +119,29 @@ for _cat, _names in CATEGORY_CLASSES.items():
 # Music sub-type names: everything in the music set except the generic "Music" label
 _MUSIC_SUBTYPES: set[str] = CATEGORY_CLASSES["music"] - {"Music", "Musical instrument"}
 
+# Clean display names for AudioSet classes with clunky names
+_DISPLAY_NAMES: dict[str, str] = {
+    "Violin, fiddle": "Violin",
+    "Marimba, xylophone": "Marimba",
+    "Wind instrument, woodwind instrument": "Woodwind",
+    "Steel guitar, slide guitar": "Steel guitar",
+    "Male speech, man speaking": "Male speech",
+    "Female speech, woman speaking": "Female speech",
+    "Child speech, kid speaking": "Child speech",
+    "Narration, monologue": "Narration",
+    "Rattle (instrument)": "Rattle",
+    "Tapping (guitar technique)": "Tapping",
+    "Keyboard (musical)": "Keyboard",
+    "Change ringing (campanology)": "Change ringing",
+    "Plucked string instrument": "Plucked strings",
+    "Bowed string instrument": "Bowed strings",
+}
+
+
+def display_name(name: str) -> str:
+    """Return a clean display name for an AudioSet class."""
+    return _DISPLAY_NAMES.get(name, name)
+
 # AudioSet ontology: child -> parent (within our music class set)
 _MUSIC_PARENT_MAP: dict[str, str] = {
     "Accordion": "Musical instrument",
@@ -282,15 +305,21 @@ def map_scores_to_categories(
 
         categories.append(best_cat)
 
-        # Collect music sub-types for this frame (deduplicated by hierarchy)
+        # Pick the single best music sub-type for this frame (deduplicated by hierarchy)
         subtypes: list[str] = []
         if best_cat == "music":
-            raw_subtypes: list[str] = []
+            raw_subtypes: list[tuple[str, float]] = []
             for idx in cat_indices["music"]:
                 name = class_names[idx]
                 if name in _MUSIC_SUBTYPES and frame_scores[idx] >= threshold:
-                    raw_subtypes.append(name)
-            subtypes = _deduplicate_subtypes(raw_subtypes)
+                    raw_subtypes.append((name, float(frame_scores[idx])))
+            # Deduplicate by hierarchy
+            deduped_names = set(_deduplicate_subtypes([n for n, _ in raw_subtypes]))
+            # Filter to only deduped, then pick the highest-scoring one
+            deduped = [(n, s) for n, s in raw_subtypes if n in deduped_names]
+            if deduped:
+                best_subtype = max(deduped, key=lambda x: x[1])
+                subtypes = [best_subtype[0]]
         music_details.append(subtypes)
 
     return categories, music_details

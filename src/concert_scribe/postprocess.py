@@ -140,7 +140,15 @@ def merge_segments(
     result = _absorb_short_segments(result, "silence", min_silence_sec)
     result = _remerge_adjacent(result)
 
-    # Step 3: Ensure first segment starts at 0.0
+    # Step 3: Filter short-duration subtypes within music segments
+    min_subtype_sec = min_music_sec
+    for seg in result:
+        if seg["category"] == "music" and seg["subtypes"]:
+            seg["subtypes"] = {
+                k: v for k, v in seg["subtypes"].items() if v >= min_subtype_sec
+            }
+
+    # Step 4: Ensure first segment starts at 0.0
     if result and result[0]["start"] > 0.0:
         result[0]["start"] = 0.0
 

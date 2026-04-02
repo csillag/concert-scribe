@@ -6,18 +6,19 @@ HOP = 0.48
 
 
 def test_merge_adjacent_same_category():
-    categories = ["music"] * 4 + ["silence"] * 5
-    details = [["Piano"], ["Piano", "Violin, fiddle"], ["Violin, fiddle"], ["Piano"]] + [[]] * 5
+    # Each frame has one subtype (as classifier now outputs)
+    categories = ["music"] * 6 + ["silence"] * 5
+    details = [["Piano"], ["Piano"], ["Piano"], ["Piano"], ["Violin, fiddle"], ["Piano"]] + [[]] * 5
 
     segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 2
     assert segments[0]["category"] == "music"
     assert abs(segments[0]["start"] - 0.0) < 0.01
-    assert abs(segments[0]["end"] - 1.92) < 0.01
-    assert set(segments[0]["subtypes"].keys()) == {"Piano", "Violin, fiddle"}
-    assert abs(segments[0]["subtypes"]["Piano"] - 1.44) < 0.01  # 3 frames
-    assert abs(segments[0]["subtypes"]["Violin, fiddle"] - 0.96) < 0.01  # 2 frames
+    assert abs(segments[0]["end"] - 2.88) < 0.01
+    assert set(segments[0]["subtypes"].keys()) == {"Piano"}
+    # Violin only has 0.48s (1 frame) < 1.5s minimum, so it's filtered
+    assert abs(segments[0]["subtypes"]["Piano"] - 2.4) < 0.01  # 5 frames
     assert segments[1]["category"] == "silence"
 
 
@@ -121,11 +122,27 @@ def test_first_segment_starts_at_zero():
 
 
 def test_subtype_durations_are_seconds():
+    # Each frame has exactly one subtype (as classifier now outputs)
     categories = ["music"] * 10
-    details = [["Piano", "Violin, fiddle"]] * 6 + [["Piano"]] * 4
+    details = [["Violin, fiddle"]] * 6 + [["Piano"]] * 4
 
     segments = merge_segments(categories, details, hop_sec=HOP)
 
     assert len(segments) == 1
-    assert abs(segments[0]["subtypes"]["Piano"] - 4.8) < 0.01  # 10 frames * 0.48
+    assert abs(segments[0]["subtypes"]["Piano"] - 1.92) < 0.01  # 4 frames * 0.48
     assert abs(segments[0]["subtypes"]["Violin, fiddle"] - 2.88) < 0.01  # 6 frames * 0.48
+    # Total should equal segment length
+    total = sum(segments[0]["subtypes"].values())
+    assert abs(total - 4.8) < 0.01  # 10 frames * 0.48
+
+
+def test_short_subtypes_filtered():
+    # Subtypes under 1.5s should be removed
+    categories = ["music"] * 10
+    details = [["Piano"]] * 8 + [["Guitar"]] * 2  # Guitar = 0.96s < 1.5s
+
+    segments = merge_segments(categories, details, hop_sec=HOP)
+
+    assert len(segments) == 1
+    assert "Piano" in segments[0]["subtypes"]
+    assert "Guitar" not in segments[0]["subtypes"]
