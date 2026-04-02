@@ -141,11 +141,19 @@ def merge_segments(
     result = _remerge_adjacent(result)
 
     # Step 3: Filter short-duration subtypes within music segments
-    min_subtype_sec = min_music_sec
+    # First: absolute minimum (same as min_music_sec)
     for seg in result:
         if seg["category"] == "music" and seg["subtypes"]:
             seg["subtypes"] = {
-                k: v for k, v in seg["subtypes"].items() if v >= min_subtype_sec
+                k: v for k, v in seg["subtypes"].items() if v >= min_music_sec
+            }
+    # Then: drop subtypes under 7% of the segment duration
+    for seg in result:
+        if seg["category"] == "music" and seg["subtypes"]:
+            seg_duration = seg["end"] - seg["start"]
+            min_pct = seg_duration * 0.07
+            seg["subtypes"] = {
+                k: v for k, v in seg["subtypes"].items() if v >= min_pct
             }
 
     # Step 4: Ensure first segment starts at 0.0
