@@ -318,6 +318,11 @@ def _ensure_pkg_resources():
 
 def load_model():
     """Load YAMNet model and class names. Caches after first call."""
+    import os
+
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+
     _ensure_pkg_resources()
     import tensorflow_hub as hub
 
