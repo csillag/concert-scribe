@@ -348,18 +348,27 @@ def _ensure_pkg_resources():
 def load_model():
     """Load YAMNet model and class names. Caches after first call."""
     import os
-
-    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-    os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
-
-    _ensure_pkg_resources()
-    import tensorflow_hub as hub
+    import sys
 
     global _model, _class_names
     if _model is not None:
         return _model, _class_names
 
-    _model = hub.load("https://tfhub.dev/google/yamnet/1")
+    _ensure_pkg_resources()
+
+    # Suppress C++ level logs from TF/CUDA/absl during import and model load
+    # These fire at shared library load time before Python logging can catch them
+    stderr_fd = sys.stderr.fileno()
+    saved_stderr = os.dup(stderr_fd)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, stderr_fd)
+    os.close(devnull)
+    try:
+        import tensorflow_hub as hub
+        _model = hub.load("https://tfhub.dev/google/yamnet/1")
+    finally:
+        os.dup2(saved_stderr, stderr_fd)
+        os.close(saved_stderr)
 
     class_map_path = _model.class_map_path().numpy().decode("utf-8")
     with open(class_map_path) as f:

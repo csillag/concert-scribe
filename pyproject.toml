@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "concert-scribe"
-version = "0.1.8"
+version = "0.1.9"
 description = "Classify audio segments in concert recordings"
 requires-python = ">=3.9"
 dependencies = [
