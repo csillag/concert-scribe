@@ -1,0 +1,2 @@
+[console_scripts]
+concert-scribe = concert_scribe.cli:main
