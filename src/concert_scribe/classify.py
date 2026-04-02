@@ -1,5 +1,7 @@
 """YAMNet-based audio classification."""
 
+import csv
+import wave
 from typing import Optional
 
 import numpy as np
@@ -184,3 +186,52 @@ def map_scores_to_categories(
         music_details.append(subtypes)
 
     return categories, music_details
+
+
+_model = None
+_class_names: Optional[list[str]] = None
+
+HOP_SECONDS = 0.48  # YAMNet's native hop size
+
+
+def load_model():
+    """Load YAMNet model and class names. Caches after first call."""
+    import tensorflow_hub as hub
+
+    global _model, _class_names
+    if _model is not None:
+        return _model, _class_names
+
+    _model = hub.load("https://tfhub.dev/google/yamnet/1")
+
+    class_map_path = _model.class_map_path().numpy().decode("utf-8")
+    with open(class_map_path) as f:
+        _class_names = [row["display_name"] for row in csv.DictReader(f)]
+
+    return _model, _class_names
+
+
+def classify_audio(wav_path: str, threshold: float = 0.1) -> tuple[list[str], list[list[str]]]:
+    """Classify a 16kHz mono WAV file into segments.
+
+    Args:
+        wav_path: Path to a 16kHz mono WAV file.
+        threshold: Minimum score for a category to be considered.
+
+    Returns:
+        Tuple of (categories_per_frame, music_details_per_frame).
+    """
+    model, class_names = load_model()
+
+    with wave.open(wav_path, "r") as wf:
+        assert wf.getnchannels() == 1, "Expected mono audio"
+        assert wf.getframerate() == 16000, "Expected 16kHz sample rate"
+        n_frames = wf.getnframes()
+        raw = wf.readframes(n_frames)
+
+    waveform = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+    scores, embeddings, spectrogram = model(waveform)
+    scores = scores.numpy()
+
+    return map_scores_to_categories(scores, class_names, threshold=threshold)
