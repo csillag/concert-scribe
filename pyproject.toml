@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0", "setuptools-scm"]
-build-backend = "setuptools.build_meta"
+build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "concert-scribe"
@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Classify audio segments in concert recordings"
 requires-python = ">=3.9"
 dependencies = [
+    "tensorflow>=2.13",
+    "tensorflow-hub>=0.14",
     "numpy>=1.23",
 ]
 
