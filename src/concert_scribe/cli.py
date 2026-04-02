@@ -5,6 +5,15 @@ import os
 import sys
 import tempfile
 
+# Suppress TensorFlow/CUDA/absl logging before any TF imports
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+
+import logging
+logging.getLogger("absl").setLevel(logging.ERROR)
+
 from concert_scribe.classify import HOP_SECONDS, classify_audio
 from concert_scribe.extract import extract_audio
 from concert_scribe.output import write_segments
