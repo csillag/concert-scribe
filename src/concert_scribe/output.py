@@ -22,12 +22,13 @@ def _format_duration(t: float) -> str:
     return s + "s"
 
 
-def write_segments(segments: list[Segment], output_path: str) -> None:
+def write_segments(segments: list[Segment], output_path: str, verbose: bool = False) -> None:
     """Write segments to a text file.
 
     Args:
         segments: List of classified segments.
         output_path: Path to write the output file.
+        verbose: If True, include per-instrument durations.
     """
     with open(output_path, "w") as f:
         for seg in segments:
@@ -37,6 +38,9 @@ def write_segments(segments: list[Segment], output_path: str) -> None:
             if seg["subtypes"]:
                 # Sort by duration descending
                 sorted_subs = sorted(seg["subtypes"].items(), key=lambda x: -x[1])
-                parts = [f"{display_name(name)}: {_format_duration(dur)}" for name, dur in sorted_subs]
+                if verbose:
+                    parts = [f"{display_name(name)}: {_format_duration(dur)}" for name, dur in sorted_subs]
+                else:
+                    parts = [display_name(name) for name, _ in sorted_subs]
                 line += f" ({', '.join(parts)})"
             f.write(line + "\n")

@@ -6,13 +6,15 @@ import sys
 import tempfile
 
 # Suppress TensorFlow/CUDA/absl logging before any TF imports
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
-os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+os.environ["ABSL_MIN_LOG_LEVEL"] = "3"
 
 import logging
 logging.getLogger("absl").setLevel(logging.ERROR)
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 from concert_scribe.classify import HOP_SECONDS, classify_audio
 from concert_scribe.extract import extract_audio
@@ -41,7 +43,7 @@ def find_video_files(input_path: str) -> list[str]:
     sys.exit(1)
 
 
-def process_file(video_path: str, output_dir: str) -> None:
+def process_file(video_path: str, output_dir: str, verbose: bool = False) -> None:
     """Process a single video file through the full pipeline."""
     basename = os.path.splitext(os.path.basename(video_path))[0]
     output_path = os.path.join(output_dir, f"{basename}.txt")
@@ -68,7 +70,7 @@ def process_file(video_path: str, output_dir: str) -> None:
         )
 
     # Write output
-    write_segments(segments, output_path)
+    write_segments(segments, output_path, verbose=verbose)
     print(f"  Written: {output_path}", file=sys.stderr)
 
 
@@ -84,6 +86,11 @@ def main():
         "-o", "--output-dir",
         default=None,
         help="Output directory for .txt files (default: same as input)",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Include per-instrument durations in output",
     )
     args = parser.parse_args()
 
@@ -102,6 +109,6 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     for video_path in video_files:
-        process_file(video_path, output_dir)
+        process_file(video_path, output_dir, verbose=args.verbose)
 
     print(f"Done. Processed {len(video_files)} file(s).", file=sys.stderr)

@@ -24,7 +24,7 @@ def test_write_segments_format():
     assert len(lines) == 5
     assert lines[0] == "0.0-4.32: silence"
     assert lines[1] == "4.32-15.36: talking"
-    assert lines[2] == "15.36-40.32: music (Piano: 20.2s, Singing: 10.1s)"
+    assert lines[2] == "15.36-40.32: music (Piano, Singing)"
     assert lines[3] == "40.32-45.12: applause"
     assert lines[4] == "45.12-50.4: silence"
 
@@ -41,9 +41,26 @@ def test_write_segments_display_names():
         with open(out_path) as f:
             line = f.read().strip()
 
-    assert "Violin:" in line
-    assert "Woodwind:" in line
+    # Default (non-verbose): no durations
+    assert "Violin," in line
+    assert "Woodwind" in line
     assert "fiddle" not in line
+    assert "s)" not in line  # no duration suffix
+
+
+def test_write_segments_verbose():
+    segments = [
+        Segment(category="music", start=0.0, end=10.0, subtypes={"Piano": 8.0, "Singing": 2.0}),
+    ]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = os.path.join(tmpdir, "test.txt")
+        write_segments(segments, out_path, verbose=True)
+
+        with open(out_path) as f:
+            line = f.read().strip()
+
+    assert line == "0.0-10.0: music (Piano: 8s, Singing: 2s)"
 
 
 def test_write_segments_empty():
