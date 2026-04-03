@@ -249,6 +249,67 @@ def _deduplicate_subtypes(subtypes: list[str]) -> list[str]:
     return [s for s in subtypes if s not in redundant]
 
 
+# Manual branch overrides: map instruments to be treated as if they belong
+# to a different branch for false-positive suppression purposes.
+# Format: "instrument name" -> "treat as same branch as this instrument"
+_BRANCH_OVERRIDES: dict[str, str] = {
+    # Pizzicato cello sounds trigger Harp false positives
+    "Harp": "Bowed string instrument",
+}
+
+# Labels that describe ensembles, not individual instruments — excluded from output
+_ENSEMBLE_LABELS: set[str] = {
+    "Orchestra",
+    "String section",
+}
+
+
+def _get_branch(name: str) -> str:
+    """Get the top-level branch for a music subtype.
+
+    Returns the child of "Musical instrument" or "Music" that this class
+    falls under. For classes directly under "Musical instrument" or "Music",
+    returns the class itself. Respects manual overrides.
+    """
+    # Check if this instrument has a manual branch override
+    if name in _BRANCH_OVERRIDES:
+        return _BRANCH_OVERRIDES[name]
+
+    current = name
+    while current in _MUSIC_PARENT_MAP:
+        parent = _MUSIC_PARENT_MAP[current]
+        if parent in ("Musical instrument", "Music"):
+            return current
+        current = parent
+    return name
+
+
+def _best_per_branch(subtypes: list[tuple[str, float]]) -> list[str]:
+    """Keep only the highest-scoring subtype within each instrument branch.
+
+    Instruments from different branches (e.g., strings vs keyboard) are
+    likely genuinely co-occurring. Instruments within the same branch
+    (e.g., cello vs double bass) are likely acoustic bleed from the
+    dominant instrument.
+    """
+    if not subtypes:
+        return []
+
+    # Group by branch
+    branches: dict[str, list[tuple[str, float]]] = {}
+    for name, score in subtypes:
+        branch = _get_branch(name)
+        branches.setdefault(branch, []).append((name, score))
+
+    # Keep the highest scorer from each branch
+    result: list[str] = []
+    for branch_subtypes in branches.values():
+        best = max(branch_subtypes, key=lambda x: x[1])
+        result.append(best[0])
+
+    return result
+
+
 def _build_category_indices(
     class_names: list[str],
 ) -> dict[str, list[int]]:
@@ -261,12 +322,21 @@ def _build_category_indices(
     return cat_indices
 
 
+SECONDARY_THRESHOLD = 0.05  # Lower threshold for detecting quieter instruments
+
+
 def map_scores_to_categories(
     scores: np.ndarray,
     class_names: list[str],
     threshold: float = 0.1,
+    raw_instruments: bool = False,
 ) -> tuple[list[str], list[list[str]]]:
     """Map per-frame YAMNet scores to the four segment categories.
+
+    Uses a two-tier detection approach:
+    - Primary (threshold): detect dominant instruments
+    - Secondary (SECONDARY_THRESHOLD): detect quieter instruments from
+      different branches than the dominant ones
 
     Args:
         scores: Array of shape (num_frames, 521) with per-class scores.
@@ -305,21 +375,38 @@ def map_scores_to_categories(
 
         categories.append(best_cat)
 
-        # Pick the single best music sub-type for this frame (deduplicated by hierarchy)
+        # Detect music sub-types with two-tier approach
         subtypes: list[str] = []
         if best_cat == "music":
-            raw_subtypes: list[tuple[str, float]] = []
+            # Collect all subtypes at both thresholds
+            primary: list[tuple[str, float]] = []
+            secondary: list[tuple[str, float]] = []
             for idx in cat_indices["music"]:
                 name = class_names[idx]
-                if name in _MUSIC_SUBTYPES and frame_scores[idx] >= threshold:
-                    raw_subtypes.append((name, float(frame_scores[idx])))
-            # Deduplicate by hierarchy
-            deduped_names = set(_deduplicate_subtypes([n for n, _ in raw_subtypes]))
-            # Filter to only deduped, then pick the highest-scoring one
-            deduped = [(n, s) for n, s in raw_subtypes if n in deduped_names]
-            if deduped:
-                best_subtype = max(deduped, key=lambda x: x[1])
-                subtypes = [best_subtype[0]]
+                if name not in _MUSIC_SUBTYPES or name in _ENSEMBLE_LABELS:
+                    continue
+                score = float(frame_scores[idx])
+                if score >= threshold:
+                    primary.append((name, score))
+                elif score >= SECONDARY_THRESHOLD:
+                    secondary.append((name, score))
+
+            if raw_instruments:
+                # Debug mode: keep all detected subtypes (only remove ancestors)
+                all_names = [n for n, _ in primary] + [n for n, _ in secondary]
+                subtypes = _deduplicate_subtypes(all_names)
+            else:
+                # Combine both tiers, but boost primary scores so they always
+                # win best-per-branch over secondary detections
+                combined: list[tuple[str, float]] = []
+                for n, s in primary:
+                    combined.append((n, s + 1.0))  # boost ensures primary wins
+                for n, s in secondary:
+                    combined.append((n, s))
+                # Deduplicate ancestors, then best per branch
+                deduped_names = set(_deduplicate_subtypes([n for n, _ in combined]))
+                deduped = [(n, s) for n, s in combined if n in deduped_names]
+                subtypes = _best_per_branch(deduped)
         music_details.append(subtypes)
 
     return categories, music_details
@@ -377,16 +464,23 @@ def load_model():
     return _model, _class_names
 
 
-def classify_audio(wav_path: str, threshold: float = 0.1) -> tuple[list[str], list[list[str]]]:
+def classify_audio(
+    wav_path: str,
+    threshold: float = 0.1,
+    raw_instruments: bool = False,
+) -> tuple[list[str], list[list[str]]]:
     """Classify a 16kHz mono WAV file into segments.
 
     Args:
         wav_path: Path to a 16kHz mono WAV file.
         threshold: Minimum score for a category to be considered.
+        raw_instruments: If True, skip branch-based false positive suppression.
 
     Returns:
         Tuple of (categories_per_frame, music_details_per_frame).
     """
+    import sys
+
     model, class_names = load_model()
 
     with wave.open(wav_path, "r") as wf:
@@ -396,8 +490,27 @@ def classify_audio(wav_path: str, threshold: float = 0.1) -> tuple[list[str], li
         raw = wf.readframes(n_frames)
 
     waveform = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    total_seconds = len(waveform) / 16000
 
-    scores, embeddings, spectrogram = model(waveform)
-    scores = scores.numpy()
+    # Process in chunks for progress reporting
+    chunk_seconds = 30
+    chunk_samples = chunk_seconds * 16000
+    all_scores = []
 
-    return map_scores_to_categories(scores, class_names, threshold=threshold)
+    processed = 0.0
+    for start in range(0, len(waveform), chunk_samples):
+        chunk = waveform[start:start + chunk_samples]
+        s, e, sp = model(chunk)
+        all_scores.append(s.numpy())
+        processed = min((start + chunk_samples) / 16000, total_seconds)
+        pct = processed / total_seconds * 100
+        print(f"\r  Classifying... {pct:.0f}% ({processed:.0f}/{total_seconds:.0f}s)", end="", file=sys.stderr)
+
+    print(file=sys.stderr)  # newline after progress
+
+    scores = np.concatenate(all_scores, axis=0)
+
+    return map_scores_to_categories(
+        scores, class_names, threshold=threshold,
+        raw_instruments=raw_instruments,
+    ), scores, class_names

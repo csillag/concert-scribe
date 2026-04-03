@@ -2,7 +2,9 @@ import numpy as np
 
 from concert_scribe.classify import (
     CATEGORY_CLASSES,
+    _best_per_branch,
     _deduplicate_subtypes,
+    _get_branch,
     map_scores_to_categories,
 )
 
@@ -74,3 +76,38 @@ def test_deduplicate_subtypes_keeps_leaf_only():
     subtypes = ["Piano", "Keyboard (musical)"]
     result = _deduplicate_subtypes(subtypes)
     assert result == ["Piano"]
+
+
+def test_get_branch():
+    assert _get_branch("Violin, fiddle") == "Bowed string instrument"
+    assert _get_branch("Cello") == "Bowed string instrument"
+    assert _get_branch("Piano") == "Keyboard (musical)"
+    assert _get_branch("Trumpet") == "Brass instrument"
+    assert _get_branch("Singing") == "Singing"
+    # Harp is overridden to be in the bowed string branch (cello false positive)
+    assert _get_branch("Harp") == "Bowed string instrument"
+
+
+def test_best_per_branch_keeps_different_branches():
+    # Cello (bowed strings) + Piano (keyboard) = different branches, keep both
+    subtypes = [("Cello", 0.8), ("Piano", 0.6)]
+    result = _best_per_branch(subtypes)
+    assert "Cello" in result
+    assert "Piano" in result
+
+
+def test_best_per_branch_keeps_only_top_within_branch():
+    # Cello and Double bass are both bowed strings — keep only the higher scorer
+    subtypes = [("Cello", 0.8), ("Double bass", 0.5), ("Piano", 0.6)]
+    result = _best_per_branch(subtypes)
+    assert "Cello" in result
+    assert "Piano" in result
+    assert "Double bass" not in result
+
+
+def test_best_per_branch_siblings_suppressed():
+    # Violin and String section are both under Bowed string instrument
+    subtypes = [("Violin, fiddle", 0.9), ("String section", 0.4)]
+    result = _best_per_branch(subtypes)
+    assert "Violin, fiddle" in result
+    assert "String section" not in result

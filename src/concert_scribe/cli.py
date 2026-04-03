@@ -16,7 +16,9 @@ import logging
 logging.getLogger("absl").setLevel(logging.ERROR)
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
-from concert_scribe.classify import HOP_SECONDS, classify_audio
+import csv as csv_mod
+
+from concert_scribe.classify import HOP_SECONDS, classify_audio, _MUSIC_SUBTYPES, display_name
 from concert_scribe.extract import extract_audio
 from concert_scribe.output import write_segments
 from concert_scribe.postprocess import merge_segments
@@ -43,7 +45,7 @@ def find_video_files(input_path: str) -> list[str]:
     sys.exit(1)
 
 
-def process_file(video_path: str, output_dir: str, verbose: bool = False) -> None:
+def process_file(video_path: str, output_dir: str, verbose: bool = False, instruments_debug: bool = False, dump_scores: bool = False) -> None:
     """Process a single video file through the full pipeline."""
     basename = os.path.splitext(os.path.basename(video_path))[0]
     output_path = os.path.join(output_dir, f"{basename}.txt")
@@ -57,9 +59,9 @@ def process_file(video_path: str, output_dir: str, verbose: bool = False) -> Non
         extract_audio(video_path, wav_path)
 
         # Classify
-        print("  Classifying...", file=sys.stderr)
-        categories, music_details = classify_audio(
-            wav_path, threshold=CONFIDENCE_THRESHOLD
+        (categories, music_details), raw_scores, class_names = classify_audio(
+            wav_path, threshold=CONFIDENCE_THRESHOLD,
+            raw_instruments=instruments_debug,
         )
 
         # Post-process
@@ -72,6 +74,27 @@ def process_file(video_path: str, output_dir: str, verbose: bool = False) -> Non
     # Write output
     write_segments(segments, output_path, verbose=verbose)
     print(f"  Written: {output_path}", file=sys.stderr)
+
+    # Dump raw scores for music frames
+    if dump_scores:
+        scores_path = os.path.join(output_dir, f"{basename}_scores.csv")
+        # Find music subtype indices
+        subtype_indices = []
+        subtype_names = []
+        for i, name in enumerate(class_names):
+            if name in _MUSIC_SUBTYPES:
+                subtype_indices.append(i)
+                subtype_names.append(display_name(name))
+        with open(scores_path, "w", newline="") as f:
+            writer = csv_mod.writer(f)
+            writer.writerow(["time", "category"] + subtype_names)
+            for frame_idx in range(len(categories)):
+                t = frame_idx * HOP_SECONDS
+                row = [f"{t:.2f}", categories[frame_idx]]
+                for si in subtype_indices:
+                    row.append(f"{raw_scores[frame_idx, si]:.4f}")
+                writer.writerow(row)
+        print(f"  Scores: {scores_path}", file=sys.stderr)
 
 
 def main():
@@ -92,6 +115,16 @@ def main():
         action="store_true",
         help="Include per-instrument durations in output",
     )
+    parser.add_argument(
+        "--instruments-debug",
+        action="store_true",
+        help="Disable instrument false-positive suppression (show all raw detections)",
+    )
+    parser.add_argument(
+        "--dump-scores",
+        action="store_true",
+        help="Write per-frame instrument scores to a CSV file for analysis",
+    )
     args = parser.parse_args()
 
     video_files = find_video_files(args.input)
@@ -109,6 +142,8 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     for video_path in video_files:
-        process_file(video_path, output_dir, verbose=args.verbose)
+        process_file(video_path, output_dir, verbose=args.verbose,
+                     instruments_debug=args.instruments_debug,
+                     dump_scores=args.dump_scores)
 
     print(f"Done. Processed {len(video_files)} file(s).", file=sys.stderr)

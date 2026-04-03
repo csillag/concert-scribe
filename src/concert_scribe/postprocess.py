@@ -155,8 +155,30 @@ def merge_segments(
             seg["subtypes"] = {
                 k: v for k, v in seg["subtypes"].items() if v >= min_pct
             }
+    # Then: within each branch, keep only the dominant instrument
+    # (suppresses e.g. Violin false positives when Cello dominates)
+    from concert_scribe.classify import _get_branch
+    for seg in result:
+        if seg["category"] == "music" and seg["subtypes"]:
+            # Group by branch
+            branches: dict[str, list[tuple[str, float]]] = {}
+            for name, dur in seg["subtypes"].items():
+                branch = _get_branch(name)
+                branches.setdefault(branch, []).append((name, dur))
+            # Keep only the top scorer in each branch
+            filtered: dict[str, float] = {}
+            for branch_items in branches.values():
+                best_name, best_dur = max(branch_items, key=lambda x: x[1])
+                filtered[best_name] = best_dur
+            seg["subtypes"] = filtered
 
-    # Step 4: Ensure first segment starts at 0.0
+    # Step 4: Clear subtypes from non-music segments
+    # (can accumulate when short music segments get absorbed into silence)
+    for seg in result:
+        if seg["category"] != "music":
+            seg["subtypes"] = {}
+
+    # Step 5: Ensure first segment starts at 0.0
     if result and result[0]["start"] > 0.0:
         result[0]["start"] = 0.0
 
